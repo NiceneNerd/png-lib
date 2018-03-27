@@ -7,50 +7,85 @@
 
 #include "../include/main_header.h"
 
-void buffer_delete_callback(char* data, void* vector)
+napi_value PNG_Encode(napi_env env, napi_callback_info info) 
 {
-    delete reinterpret_cast<std::vector<u8> *> (vector);
-}
+    size_t argc = 3;
+    napi_value argv[3];
 
-NAN_METHOD(encode)
-{
-    // check arguments
-    if(info.Length() != 3) {
-        return Nan::ThrowError(Nan::New("PNG::encode - expected arguments bufferIn, width, height").ToLocalChecked());
-    }
-/*
-    if(!info[0]->IsBuffer()) {
-        return Nan::ThrowError(Nan::New("PNG::encode - the first argument must be a buffer").ToLocalChecked());
-    }*/
-
-    if(!info[1]->IsNumber() || !info[2]->IsNumber()) {
-        return Nan::ThrowError(Nan::New("PNG::encode - the second and third argument must be numbers").ToLocalChecked());
+    if(napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok)
+    {
+        napi_throw_error(env, NULL, "Failed to parse arguments");
+        return nullptr;
     }
 
-    auto bufferInObj = info[0]->ToObject();
-    int width  = info[1]->NumberValue();
-    int height = info[2]->NumberValue();
+    s32 imageWidth;
+    s32 imageHeight;
 
-    u8* bufferIn = (u8*)node::Buffer::Data(bufferInObj);
-    auto bufferInSize = node::Buffer::Length(bufferInObj);
+    u8* bufferIn = nullptr;
+    size_t bufferInSize = 0;
 
-    std::vector<u8> *bufferOut = new std::vector<u8>();
+    bool isBuffer;
+    if(napi_is_buffer(env, argv[0], &isBuffer) != napi_ok || !isBuffer)
+    {
+        napi_throw_error(env, NULL, "Argument 1 is not a Buffer");
+        return nullptr;
+    }
 
-    unsigned error = lodepng::encode(*bufferOut, bufferIn, width, height);
+    if(napi_get_buffer_info(env, argv[0], (void**)&bufferIn, &bufferInSize) != napi_ok)
+    {
+        napi_throw_error(env, NULL, "Invalid Buffer was passed as argument");
+        return nullptr;
+    }
 
-    //if there's an error, display it
+    if(napi_get_value_int32(env, argv[1], &imageWidth) != napi_ok)
+    {
+        napi_throw_error(env, NULL, "Can't parse the width parameter");
+        return nullptr;
+    }
+
+    if(napi_get_value_int32(env, argv[2], &imageHeight) != napi_ok)
+    {
+        napi_throw_error(env, NULL, "Can't parse the height parameter");
+        return nullptr;
+    }
+
+    if((int)bufferInSize != (imageWidth * imageHeight * 4))
+    {
+        napi_throw_error(env, NULL, "Buffer size does not match the width and height");
+        return nullptr;
+    }
+
+    std::vector<u8> bufferOut = std::vector<u8>();
+    unsigned error = lodepng::encode(bufferOut, bufferIn, imageWidth, imageHeight);
+
     if(error) 
     {
-        return Nan::ThrowError(Nan::New(lodepng_error_text(error)).ToLocalChecked());
-        //std::cout << "encoder error " << error << ": "<< lodepng_error_text(error) << std::endl;
+        napi_throw_error(env, NULL, "lodepng error");
+            return nullptr;
     }
 
-    info.GetReturnValue().Set(Nan::NewBuffer((char*)bufferOut->data(), bufferOut->size(), buffer_delete_callback, bufferOut).ToLocalChecked());
+    napi_value resultBuffer;
+    void* createdBuffer;
+
+    if(napi_create_buffer_copy(env, bufferOut.size(), bufferOut.data(), &createdBuffer, &resultBuffer) != napi_ok)
+    {
+        napi_throw_error(env, NULL, "Unable to create Buffer");
+        return nullptr;
+    }
+
+    return resultBuffer;
 }
 
-NAN_MODULE_INIT(Initialize)
+napi_value Init(napi_env env, napi_value exports) 
 {
-    NAN_EXPORT(target, encode);
+    napi_value fnEncode;
+    if(napi_create_function(env, NULL, 0, PNG_Encode, NULL, &fnEncode) != napi_ok) 
+        napi_throw_error(env, NULL, "Unable to wrap native function");
+
+    if(napi_set_named_property(env, exports, "encode", fnEncode) != napi_ok) 
+        napi_throw_error(env, NULL, "Unable to populate exports");
+
+    return exports;
 }
 
-NODE_MODULE(png, Initialize);
+NAPI_MODULE(NODE_GYP_MODULE_NAME, Init)

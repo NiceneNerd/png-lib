@@ -1,9 +1,6 @@
 {
     "targets": [
     {
-        "include_dirs": [
-            "<!(node -e \"require('nan')\")"
-        ],
         "target_name": "png",
         "sources": [
             "src/main.cpp",
